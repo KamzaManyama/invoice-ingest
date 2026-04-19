@@ -3,739 +3,883 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Supplier Invoice Ingest</title>
+  <title>Invoice Ingest</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;0,9..144,700;1,9..144,300&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --ink:          #0d0d0d;
-      --paper:        #f5f2ec;
-      --paper-dark:   #ede9e0;
-      --accent:       #c84b31;
-      --accent-light: #f5cdc5;
-      --green:        #1a6b3c;
-      --green-light:  #c3e6d4;
-      --amber:        #8a6200;
-      --amber-light:  #fdeaaa;
-      --border:       #c8c2b5;
+      --ink:        #111110;
+      --paper:      #faf9f7;
+      --mid:        #f0ede8;
+      --mid2:       #e4e0d8;
+      --border:     #d6d1c8;
+      --muted:      #8a8680;
+      --accent:     #d4622a;
+      --accent2:    #f0e6df;
+      --green:      #2d6a4f;
+      --green-bg:   #d8ede5;
+      --amber:      #7a5c00;
+      --amber-bg:   #fef3d0;
+      --red:        #b91c1c;
+      --red-bg:     #fde8e8;
     }
-
-    *, *::before, *::after { box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; }
 
     body {
-      font-family: 'Syne', sans-serif;
+      font-family: 'DM Sans', sans-serif;
       background: var(--paper);
       color: var(--ink);
       min-height: 100vh;
+      font-size: 14px;
     }
+    .serif  { font-family: 'Fraunces', serif; }
+    .mono   { font-family: 'DM Mono', monospace; }
 
-    .mono { font-family: 'IBM Plex Mono', monospace; }
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--mid); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
-    /* ── Drop zone ─────────────────────────────────────────────────────── */
+    /* ── Dropzone ── */
     #dropzone {
-      border: 2px dashed var(--border);
-      transition: border-color 0.2s, background 0.2s;
+      border: 1.5px dashed var(--border);
+      transition: border-color .2s, background .2s;
     }
-    #dropzone.drag-over {
-      border-color: var(--accent);
-      background: var(--accent-light);
+    #dropzone.over { border-color: var(--accent); background: var(--accent2); }
+    #dropzone.over .upload-icon { transform: translateY(-4px); }
+    .upload-icon { transition: transform .2s; }
+
+    /* ── Progress ── */
+    #prog-bar { transition: width .35s ease; }
+
+    /* ── Badges ── */
+    .b-ins  { background: var(--green-bg); color: var(--green);  }
+    .b-dup  { background: var(--amber-bg); color: var(--amber);  }
+    .b-fail { background: var(--red-bg);   color: var(--red);    }
+
+    /* ── Table rows ── */
+    .inv-row { cursor: pointer; transition: background .12s; }
+    .inv-row:hover { background: var(--mid); }
+    .inv-row td { border-bottom: 1px solid var(--mid2); }
+
+    /* ── Dots loader ── */
+    @keyframes blink { 0%,80%,100%{opacity:.15} 40%{opacity:1} }
+    .dot { animation: blink 1.3s infinite both; }
+    .dot:nth-child(2){animation-delay:.2s}
+    .dot:nth-child(3){animation-delay:.4s}
+
+    /* ── Slide-up ── */
+    @keyframes slideUp {
+      from { opacity:0; transform:translateY(10px); }
+      to   { opacity:1; transform:translateY(0); }
     }
-    #dropzone.drag-over .drop-icon { transform: scale(1.12); }
-    .drop-icon { transition: transform 0.2s; }
+    .slide-up { animation: slideUp .25s ease both; }
 
-    /* ── Progress bar ──────────────────────────────────────────────────── */
-    #progress-bar { transition: width 0.4s ease; }
+    /* ── Stagger cards ── */
+    .stagger > * { animation: slideUp .3s ease both; }
+    .stagger > *:nth-child(1){animation-delay:.04s}
+    .stagger > *:nth-child(2){animation-delay:.08s}
+    .stagger > *:nth-child(3){animation-delay:.12s}
+    .stagger > *:nth-child(4){animation-delay:.16s}
 
-    /* ── Badges ────────────────────────────────────────────────────────── */
-    .badge-inserted  { background: var(--green-light);  color: var(--green);  }
-    .badge-duplicate { background: var(--amber-light);  color: var(--amber);  }
-    .badge-failed    { background: var(--accent-light); color: var(--accent); }
+    /* ── Toast ── */
+    #toast { transition: opacity .2s, transform .2s; }
+    #toast.hidden { opacity:0; transform:translateY(8px); pointer-events:none; }
 
-    /* ── Table ─────────────────────────────────────────────────────────── */
-    tbody tr { border-bottom: 1px solid var(--paper-dark); }
-    tbody tr:hover { background: var(--paper-dark); }
-
-    /* ── Scrollbar ─────────────────────────────────────────────────────── */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: var(--paper-dark); }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-    /* ── Dots ──────────────────────────────────────────────────────────── */
-    @keyframes blink {
-      0%, 80%, 100% { opacity: 0.2; }
-      40%           { opacity: 1;   }
+    /* ── Overlay ── */
+    .overlay {
+      transition: opacity .2s;
+      backdrop-filter: blur(4px);
     }
-    .dot { animation: blink 1.4s infinite both; }
-    .dot:nth-child(2) { animation-delay: 0.2s; }
-    .dot:nth-child(3) { animation-delay: 0.4s; }
+    .overlay.hidden { opacity:0; pointer-events:none; }
 
-    /* ── Toast ─────────────────────────────────────────────────────────── */
-    #toast { transition: opacity 0.25s, transform 0.25s; }
-    #toast.hidden { opacity: 0; transform: translateY(10px); pointer-events: none; }
-
-    /* ── Animations ────────────────────────────────────────────────────── */
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(8px); }
-      to   { opacity: 1; transform: translateY(0);   }
+    /* ── Modal box ── */
+    .modal-box {
+      transition: transform .22s ease, opacity .22s ease;
     }
-    .fade-up { animation: fadeUp 0.28s ease both; }
-
-    /* ── Modal ─────────────────────────────────────────────────────────── */
-    #csv-modal {
-      transition: opacity 0.2s;
-    }
-    #csv-modal.hidden { opacity: 0; pointer-events: none; }
-    #csv-modal-box {
-      transition: transform 0.22s ease, opacity 0.22s ease;
-    }
-    #csv-modal.hidden #csv-modal-box {
-      transform: translateY(12px) scale(0.98);
+    .overlay.hidden .modal-box {
+      transform: translateY(14px) scale(.97);
       opacity: 0;
     }
 
-    /* ── Stat card ─────────────────────────────────────────────────────── */
-    .stat-card { border: 1.5px solid var(--border); }
+    /* ── Bar chart ── */
+    .bar-track {
+      height: 6px;
+      background: var(--mid2);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: var(--accent);
+      transition: width .5s ease;
+    }
 
-    /* ── Column pill ───────────────────────────────────────────────────── */
+    /* ── Pill pills ── */
     .col-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 10px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-family: 'IBM Plex Mono', monospace;
-      border: 1px solid var(--border);
-      background: white;
-      line-height: 1.4;
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 9px; border-radius: 6px; font-size: 11px;
+      font-family: 'DM Mono', monospace;
+      border: 1px solid var(--border); background: white;
     }
-    .col-pill .req-dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
+    .req-dot { width:5px; height:5px; border-radius:50%; flex-shrink:0; }
+
+    /* ── Detail modal label/value ── */
+    .dl dt { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:2px; }
+    .dl dd { font-size:14px; font-family:'DM Mono',monospace; color:var(--ink); }
   </style>
 </head>
-<body class="min-h-screen">
+<body>
 
-  <!-- ════════════════════════════════════════════════════════════════════
-       Header
-  ════════════════════════════════════════════════════════════════════ -->
-  <header class="border-b border-[var(--border)] bg-[var(--ink)] text-[var(--paper)]">
-    <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-          <rect x="1" y="1" width="26" height="26" rx="4" stroke="currentColor" stroke-width="2"/>
-          <path d="M7 10h14M7 14h10M7 18h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <circle cx="21" cy="19" r="4" fill="var(--accent)" stroke="var(--ink)" stroke-width="1.5"/>
-          <path d="M19.5 19h3M21 17.5v3" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-        <span class="text-xl font-bold tracking-tight">Invoice Ingest</span>
-      </div>
+<!-- ══════════════════════════════════════════════════════════
+     HEADER
+══════════════════════════════════════════════════════════ -->
+<header style="background:var(--ink);color:var(--paper);" class="sticky top-0 z-30">
+  <div class="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <rect x=".5" y=".5" width="23" height="23" rx="5" stroke="currentColor" stroke-opacity=".4"/>
+        <path d="M6 8h12M6 12h9M6 16h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        <circle cx="19" cy="17" r="3.5" fill="var(--accent)" stroke="var(--ink)" stroke-width="1.2"/>
+        <path d="M18 17h2M19 16v2" stroke="white" stroke-width="1.2" stroke-linecap="round"/>
+      </svg>
+      <span class="serif font-semibold text-base tracking-tight" style="color:var(--paper)">Invoice Ingest</span>
+    </div>
+    <div class="flex items-center gap-5">
       <label class="flex items-center gap-2 cursor-pointer select-none">
-        <input type="checkbox" id="dry-run-toggle" class="w-4 h-4 accent-[var(--accent)]" />
-        <span class="text-sm text-gray-300 font-medium">Dry Run</span>
+        <div id="dry-run-track"
+          onclick="toggleDryRun()"
+          class="relative w-8 h-4 rounded-full transition-colors cursor-pointer"
+          style="background:var(--muted)"
+        >
+          <div id="dry-run-thumb"
+            class="absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform"></div>
+        </div>
+        <span class="text-xs" style="color:#aaa">Dry Run</span>
       </label>
     </div>
-  </header>
+  </div>
+</header>
 
-  <!-- ════════════════════════════════════════════════════════════════════
-       Main
-  ════════════════════════════════════════════════════════════════════ -->
-  <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+<!-- ══════════════════════════════════════════════════════════
+     MAIN
+══════════════════════════════════════════════════════════ -->
+<main class="max-w-7xl mx-auto px-6 py-7 space-y-6">
 
-    <!-- Stats -->
-    <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="stat-card rounded-xl p-5 bg-white">
-        <p class="text-xs uppercase tracking-widest text-gray-400 mb-1">Total</p>
-        <p id="stat-total" class="text-3xl font-bold mono">—</p>
-      </div>
-      <div class="stat-card rounded-xl p-5 bg-white">
-        <p class="text-xs uppercase tracking-widest text-[var(--green)] mb-1">Inserted</p>
-        <p id="stat-inserted" class="text-3xl font-bold mono text-[var(--green)]">—</p>
-      </div>
-      <div class="stat-card rounded-xl p-5 bg-white">
-        <p class="text-xs uppercase tracking-widest text-[var(--amber)] mb-1">Duplicates</p>
-        <p id="stat-duplicate" class="text-3xl font-bold mono text-[var(--amber)]">—</p>
-      </div>
-      <div class="stat-card rounded-xl p-5 bg-white">
-        <p class="text-xs uppercase tracking-widest text-[var(--accent)] mb-1">Failed</p>
-        <p id="stat-failed" class="text-3xl font-bold mono text-[var(--accent)]">—</p>
-      </div>
-    </section>
+  <!-- STAT CARDS -->
+  <div class="stagger grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="rounded-xl p-5 bg-white" style="border:1.5px solid var(--border)">
+      <p class="text-xs uppercase tracking-widest mb-2" style="color:var(--muted)">Total</p>
+      <p id="s-total" class="serif text-4xl font-semibold">—</p>
+    </div>
+    <div class="rounded-xl p-5 bg-white" style="border:1.5px solid var(--border)">
+      <p class="text-xs uppercase tracking-widest mb-2" style="color:var(--green)">Inserted</p>
+      <p id="s-inserted" class="serif text-4xl font-semibold" style="color:var(--green)">—</p>
+    </div>
+    <div class="rounded-xl p-5 bg-white" style="border:1.5px solid var(--border)">
+      <p class="text-xs uppercase tracking-widest mb-2" style="color:var(--amber)">Duplicates</p>
+      <p id="s-dup" class="serif text-4xl font-semibold" style="color:var(--amber)">—</p>
+    </div>
+    <div class="rounded-xl p-5 bg-white" style="border:1.5px solid var(--border)">
+      <p class="text-xs uppercase tracking-widest mb-2" style="color:var(--red)">Failed</p>
+      <p id="s-failed" class="serif text-4xl font-semibold" style="color:var(--red)">—</p>
+    </div>
+  </div>
 
-    <!-- Upload + Last Run -->
-    <section class="grid md:grid-cols-2 gap-6">
+  <!-- UPLOAD + LAST RUN -->
+  <div class="grid md:grid-cols-2 gap-4">
 
-      <!-- Upload card -->
-      <div class="bg-white rounded-xl border border-[var(--border)] p-6 flex flex-col gap-4">
-
-        <!-- Card header -->
-        <div class="flex items-center justify-between">
-          <h2 class="font-bold text-lg tracking-tight">Upload Invoice CSV</h2>
-          <button
-            onclick="openCsvModal()"
-            title="What format does the CSV need?"
-            class="w-7 h-7 rounded-full border border-[var(--border)] text-gray-400 text-sm font-bold
-                   hover:border-[var(--ink)] hover:text-[var(--ink)] transition-colors flex items-center justify-center"
-          >?</button>
-        </div>
-
-        <!-- Drop zone -->
-        <div
-          id="dropzone"
-          onclick="document.getElementById('file-input').click()"
-          class="rounded-lg p-10 flex flex-col items-center justify-center gap-3 cursor-pointer text-center"
-        >
-          <svg class="drop-icon w-10 h-10 text-gray-300" fill="none" viewBox="0 0 48 48">
-            <path d="M24 32V16M24 16l-6 6M24 16l6 6"
-              stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M10 34a8 8 0 01.38-16H12a12 12 0 0123.42-2.5A7.5 7.5 0 0138 34"
-              stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-          </svg>
-          <p class="text-sm text-gray-500">Drag &amp; drop a <span class="mono font-medium">.csv</span> file here</p>
-          <p class="text-xs text-gray-400">or click to browse</p>
-          <input type="file" id="file-input" accept=".csv,text/csv" class="hidden" />
-        </div>
-
-        <!-- Selected file pill -->
-        <div id="file-info"
-          class="hidden rounded-md bg-[var(--paper-dark)] px-3 py-2.5 flex items-center justify-between gap-2">
-          <div class="flex items-center gap-2 min-w-0">
-            <svg class="w-4 h-4 flex-shrink-0 text-[var(--accent)]" fill="none" viewBox="0 0 20 20">
-              <path d="M4 4h8l4 4v8H4V4z" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M12 4v4h4" stroke="currentColor" stroke-width="1.5"/>
-            </svg>
-            <span id="file-name" class="text-sm mono truncate text-[var(--ink)]"></span>
-          </div>
-          <button onclick="clearFile()"
-            class="text-gray-400 hover:text-[var(--accent)] text-xl leading-none flex-shrink-0 transition-colors">×</button>
-        </div>
-
-        <!-- Progress -->
-        <div id="progress-wrap" class="hidden space-y-1.5">
-          <div class="h-1 bg-[var(--paper-dark)] rounded-full overflow-hidden">
-            <div id="progress-bar" class="h-full bg-[var(--accent)] rounded-full w-0"></div>
-          </div>
-          <p class="text-xs text-gray-400 mono flex gap-0.5 items-center">
-            Processing<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
-          </p>
-        </div>
-
-        <button
-          id="submit-btn"
-          onclick="submitFile()"
-          disabled
-          class="mt-auto w-full py-3 rounded-lg bg-[var(--ink)] text-[var(--paper)] font-semibold
-                 text-sm tracking-wide disabled:opacity-25 disabled:cursor-not-allowed
-                 hover:bg-[var(--accent)] transition-colors"
-        >Run Ingest</button>
-      </div>
-
-      <!-- Last Run card -->
-      <div class="bg-white rounded-xl border border-[var(--border)] p-6 flex flex-col gap-4 min-h-[360px]">
-        <h2 class="font-bold text-lg tracking-tight">Last Run</h2>
-
-        <!-- Empty state -->
-        <div id="run-placeholder"
-          class="flex-1 flex flex-col items-center justify-center gap-3 text-gray-300 select-none">
-          <svg class="w-10 h-10" fill="none" viewBox="0 0 48 48">
-            <circle cx="24" cy="24" r="20" stroke="currentColor" stroke-width="2" stroke-dasharray="4 4"/>
-            <path d="M24 16v8l5 3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          <p class="text-sm">Upload a CSV to see results here</p>
-        </div>
-
-        <!-- Results (shown after first run) -->
-        <div id="run-result" class="hidden flex-1 flex flex-col gap-3">
-          <div class="grid grid-cols-3 gap-3 text-center">
-            <div class="rounded-lg p-3 badge-inserted">
-              <p class="text-2xl font-bold mono" id="run-inserted">0</p>
-              <p class="text-xs uppercase tracking-wide mt-0.5 font-semibold">Inserted</p>
-            </div>
-            <div class="rounded-lg p-3 badge-duplicate">
-              <p class="text-2xl font-bold mono" id="run-dup">0</p>
-              <p class="text-xs uppercase tracking-wide mt-0.5 font-semibold">Duplicates</p>
-            </div>
-            <div class="rounded-lg p-3 badge-failed">
-              <p class="text-2xl font-bold mono" id="run-failed">0</p>
-              <p class="text-xs uppercase tracking-wide mt-0.5 font-semibold">Failed</p>
-            </div>
-          </div>
-          <p class="text-xs text-gray-400 mono" id="run-meta"></p>
-          <div class="overflow-auto rounded-md border border-[var(--border)] flex-1 max-h-48">
-            <table class="w-full text-xs">
-              <thead class="sticky top-0 bg-[var(--paper-dark)]">
-                <tr class="text-left">
-                  <th class="px-3 py-2 font-semibold">#</th>
-                  <th class="px-3 py-2 font-semibold">Invoice</th>
-                  <th class="px-3 py-2 font-semibold">Supplier</th>
-                  <th class="px-3 py-2 font-semibold">Status</th>
-                  <th class="px-3 py-2 font-semibold">Note</th>
-                </tr>
-              </thead>
-              <tbody id="run-rows"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Invoice Records -->
-    <section class="bg-white rounded-xl border border-[var(--border)] p-6 space-y-4">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h2 class="font-bold text-lg tracking-tight">Invoice Records</h2>
-        <div class="flex flex-wrap gap-2">
-          <input
-            id="search-input"
-            type="text"
-            placeholder="Search invoice or supplier…"
-            oninput="debounceSearch()"
-            class="border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm mono w-52
-                   focus:outline-none focus:border-[var(--ink)] transition-colors"
-          />
-          <select
-            id="status-filter"
-            onchange="loadInvoices(1)"
-            class="border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm
-                   focus:outline-none focus:border-[var(--ink)] transition-colors"
-          >
-            <option value="">All statuses</option>
-            <option value="inserted">Inserted</option>
-            <option value="duplicate">Duplicate</option>
-            <option value="failed">Failed</option>
-          </select>
-          <button
-            onclick="loadInvoices(currentPage)"
-            class="px-3 py-1.5 rounded-lg bg-[var(--paper-dark)] text-sm font-medium
-                   hover:bg-[var(--border)] transition-colors"
-          >↻ Refresh</button>
-        </div>
-      </div>
-
-      <div class="overflow-auto rounded-lg border border-[var(--border)]">
-        <table class="w-full text-sm min-w-[800px]">
-          <thead class="bg-[var(--paper-dark)] text-xs uppercase tracking-wider">
-            <tr>
-              <th class="px-4 py-3 text-left font-semibold">Invoice #</th>
-              <th class="px-4 py-3 text-left font-semibold">Supplier</th>
-              <th class="px-4 py-3 text-left font-semibold">Department</th>
-              <th class="px-4 py-3 text-right font-semibold">Excl. VAT</th>
-              <th class="px-4 py-3 text-right font-semibold">VAT</th>
-              <th class="px-4 py-3 text-right font-semibold">Incl. VAT</th>
-              <th class="px-4 py-3 text-left font-semibold">Date</th>
-              <th class="px-4 py-3 text-left font-semibold">Status</th>
-            </tr>
-          </thead>
-          <tbody id="invoice-tbody">
-            <tr><td colspan="8" class="text-center py-12 text-gray-300 text-sm">Loading…</td></tr>
-          </tbody>
-        </table>
-      </div>
-
+    <!-- Upload -->
+    <div class="bg-white rounded-xl p-6 flex flex-col gap-4" style="border:1.5px solid var(--border)">
       <div class="flex items-center justify-between">
-        <p id="pagination-info" class="text-gray-400 mono text-xs"></p>
-        <div class="flex gap-2">
-          <button id="prev-btn" onclick="loadInvoices(currentPage - 1)" disabled
-            class="px-3 py-1.5 rounded-lg border border-[var(--border)] text-sm
-                   disabled:opacity-30 hover:bg-[var(--paper-dark)] transition-colors">← Prev</button>
-          <button id="next-btn" onclick="loadInvoices(currentPage + 1)" disabled
-            class="px-3 py-1.5 rounded-lg border border-[var(--border)] text-sm
-                   disabled:opacity-30 hover:bg-[var(--paper-dark)] transition-colors">Next →</button>
-        </div>
+        <h2 class="serif font-semibold text-lg">Upload CSV</h2>
+        <button onclick="openModal('csv-modal')"
+          class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors"
+          style="border:1.5px solid var(--border);color:var(--muted)"
+          onmouseover="this.style.color='var(--ink)';this.style.borderColor='var(--ink)'"
+          onmouseout="this.style.color='var(--muted)';this.style.borderColor='var(--border)'">?</button>
       </div>
-    </section>
 
-  </main>
-
-  <!-- ════════════════════════════════════════════════════════════════════
-       CSV Format Modal
-  ════════════════════════════════════════════════════════════════════ -->
-  <div
-    id="csv-modal"
-    onclick="closeCsvModal(event)"
-    class="hidden fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-    role="dialog" aria-modal="true" aria-labelledby="modal-title"
-  >
-    <div
-      id="csv-modal-box"
-      class="bg-[var(--paper)] rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
-    >
-      <!-- Modal header -->
-      <div class="flex items-center justify-between px-6 pt-6 pb-4 border-b border-[var(--border)]">
+      <div id="dropzone" onclick="document.getElementById('file-input').click()"
+        class="rounded-xl p-10 flex flex-col items-center gap-3 cursor-pointer text-center">
+        <svg class="upload-icon w-9 h-9" style="color:var(--border)" fill="none" viewBox="0 0 48 48">
+          <path d="M24 30V14M24 14l-7 7M24 14l7 7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 34a9 9 0 010-18h2a13 13 0 0126 0h1a8 8 0 010 16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
         <div>
-          <h2 id="modal-title" class="font-bold text-xl tracking-tight">CSV File Format</h2>
-          <p class="text-sm text-gray-500 mt-0.5">What your spreadsheet needs to include</p>
+          <p class="text-sm" style="color:var(--muted)">Drop a <span class="mono" style="color:var(--ink)">.csv</span> file here</p>
+          <p class="text-xs mt-1" style="color:var(--border)">or click to browse</p>
         </div>
-        <button
-          onclick="closeCsvModal()"
-          class="w-8 h-8 rounded-full flex items-center justify-center text-gray-400
-                 hover:bg-[var(--paper-dark)] hover:text-[var(--ink)] transition-colors text-xl leading-none"
-        >×</button>
+        <input type="file" id="file-input" accept=".csv,text/csv" class="hidden" />
       </div>
 
-      <!-- Modal body -->
-      <div class="px-6 py-5 space-y-6">
+      <div id="file-info" class="hidden items-center justify-between gap-2 rounded-lg px-3 py-2.5"
+        style="background:var(--mid);display:none">
+        <div class="flex items-center gap-2 min-w-0">
+          <svg class="w-4 h-4 flex-shrink-0" style="color:var(--accent)" fill="none" viewBox="0 0 20 20">
+            <path d="M4 3h8l4 4v10H4V3z" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M12 3v4h4" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+          <span id="file-name" class="text-sm mono truncate"></span>
+        </div>
+        <button onclick="clearFile()" class="text-lg leading-none flex-shrink-0 transition-colors"
+          style="color:var(--muted)"
+          onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">×</button>
+      </div>
 
-        <!-- Required columns -->
-        <div class="space-y-3">
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-[var(--accent)] flex-shrink-0"></span>
-            <h3 class="font-semibold text-sm uppercase tracking-wider text-gray-500">Required columns</h3>
+      <div id="prog-wrap" class="hidden space-y-1.5">
+        <div class="h-0.5 rounded-full overflow-hidden" style="background:var(--mid2)">
+          <div id="prog-bar" class="h-full rounded-full w-0" style="background:var(--accent)"></div>
+        </div>
+        <p class="text-xs mono flex gap-0.5 items-center" style="color:var(--muted)">
+          Processing<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+        </p>
+      </div>
+
+      <button id="submit-btn" onclick="submitFile()" disabled
+        class="mt-auto w-full py-2.5 rounded-lg text-sm font-semibold tracking-wide transition-colors"
+        style="background:var(--ink);color:var(--paper);opacity:.25;cursor:not-allowed"
+      >Run Ingest</button>
+    </div>
+
+    <!-- Last Run -->
+    <div class="bg-white rounded-xl p-6 flex flex-col gap-4" style="border:1.5px solid var(--border);min-height:340px">
+      <h2 class="serif font-semibold text-lg">Last Run</h2>
+
+      <div id="run-empty" class="flex-1 flex flex-col items-center justify-center gap-3"
+        style="color:var(--border)">
+        <svg class="w-10 h-10" fill="none" viewBox="0 0 48 48">
+          <circle cx="24" cy="24" r="19" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 4"/>
+          <path d="M24 15v9l5 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <p class="text-sm">Upload a CSV to see results</p>
+      </div>
+
+      <div id="run-result" class="hidden flex-1 flex flex-col gap-3">
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div class="rounded-lg p-3 b-ins">
+            <p class="serif text-2xl font-semibold" id="r-ins">0</p>
+            <p class="text-xs uppercase tracking-wide mt-0.5 font-medium">Inserted</p>
           </div>
-          <div class="flex flex-wrap gap-2">
-            <span class="col-pill"><span class="req-dot bg-[var(--accent)]"></span>supplier_number</span>
-            <span class="col-pill"><span class="req-dot bg-[var(--accent)]"></span>supplier_name</span>
-            <span class="col-pill"><span class="req-dot bg-[var(--accent)]"></span>invoice_number</span>
-            <span class="col-pill"><span class="req-dot bg-[var(--accent)]"></span>department</span>
-            <span class="col-pill"><span class="req-dot bg-[var(--accent)]"></span>invoice_date</span>
-            <span class="col-pill"><span class="req-dot bg-[var(--accent)]"></span>amount_excl</span>
+          <div class="rounded-lg p-3 b-dup">
+            <p class="serif text-2xl font-semibold" id="r-dup">0</p>
+            <p class="text-xs uppercase tracking-wide mt-0.5 font-medium">Duplicates</p>
+          </div>
+          <div class="rounded-lg p-3 b-fail">
+            <p class="serif text-2xl font-semibold" id="r-fail">0</p>
+            <p class="text-xs uppercase tracking-wide mt-0.5 font-medium">Failed</p>
           </div>
         </div>
-
-        <!-- Optional columns -->
-        <div class="space-y-3">
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-[var(--border)] flex-shrink-0"></span>
-            <h3 class="font-semibold text-sm uppercase tracking-wider text-gray-500">Optional columns</h3>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <span class="col-pill"><span class="req-dot bg-[var(--border)]"></span>vat_rate</span>
-            <span class="col-pill"><span class="req-dot bg-[var(--border)]"></span>vat</span>
-            <span class="col-pill"><span class="req-dot bg-[var(--border)]"></span>amount_incl</span>
-          </div>
-          <p class="text-xs text-gray-500 leading-relaxed">
-            If <span class="mono">vat_rate</span> is omitted, 15% VAT (South Africa) is applied automatically.
-            If <span class="mono">amount_incl</span> is omitted, it is calculated from <span class="mono">amount_excl + vat</span>.
-          </p>
+        <p class="text-xs mono" style="color:var(--muted)" id="r-meta"></p>
+        <div class="overflow-auto rounded-lg flex-1 max-h-44" style="border:1px solid var(--border)">
+          <table class="w-full text-xs">
+            <thead class="sticky top-0" style="background:var(--mid)">
+              <tr>
+                <th class="px-3 py-2 text-left font-semibold">#</th>
+                <th class="px-3 py-2 text-left font-semibold">Invoice</th>
+                <th class="px-3 py-2 text-left font-semibold">Supplier</th>
+                <th class="px-3 py-2 text-left font-semibold">Status</th>
+                <th class="px-3 py-2 text-left font-semibold">Note</th>
+              </tr>
+            </thead>
+            <tbody id="r-rows"></tbody>
+          </table>
         </div>
+      </div>
+    </div>
+  </div>
 
-        <!-- Rules -->
-        <div class="space-y-3">
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-[var(--green)] flex-shrink-0"></span>
-            <h3 class="font-semibold text-sm uppercase tracking-wider text-gray-500">Validation rules</h3>
-          </div>
-          <ul class="space-y-2 text-sm text-gray-600">
-            <li class="flex gap-2">
-              <span class="text-[var(--green)] font-bold flex-shrink-0 mt-0.5">✓</span>
-              <span><span class="mono text-xs">invoice_date</span> must be in <span class="font-medium">YYYY-MM-DD</span> format and cannot be a future date.</span>
-            </li>
-            <li class="flex gap-2">
-              <span class="text-[var(--green)] font-bold flex-shrink-0 mt-0.5">✓</span>
-              <span>Duplicate invoices (same supplier + invoice number) are automatically skipped.</span>
-            </li>
-            <li class="flex gap-2">
-              <span class="text-[var(--green)] font-bold flex-shrink-0 mt-0.5">✓</span>
-              <span>All amounts are rounded to 2 decimal places. VAT must match within ±R 0.01.</span>
-            </li>
-          </ul>
+  <!-- INVOICE RECORDS TABLE -->
+  <div class="bg-white rounded-xl p-6 space-y-4" style="border:1.5px solid var(--border)">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div>
+        <h2 class="serif font-semibold text-lg">Invoice Records</h2>
+        <p class="text-xs mt-0.5" style="color:var(--muted)">Click any row for full details</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <input id="search-input" type="text" placeholder="Search…" oninput="debounceSearch()"
+          class="rounded-lg px-3 py-1.5 text-sm mono w-44 transition-colors outline-none"
+          style="border:1.5px solid var(--border);background:var(--paper)"
+          onfocus="this.style.borderColor='var(--ink)'" onblur="this.style.borderColor='var(--border)'" />
+        <select id="status-filter" onchange="loadInvoices(1)"
+          class="rounded-lg px-3 py-1.5 text-sm outline-none transition-colors"
+          style="border:1.5px solid var(--border);background:var(--paper)"
+          onfocus="this.style.borderColor='var(--ink)'" onblur="this.style.borderColor='var(--border)'">
+          <option value="">All statuses</option>
+          <option value="inserted">Inserted</option>
+          <option value="duplicate">Duplicate</option>
+          <option value="failed">Failed</option>
+        </select>
+        <button onclick="loadInvoices(currentPage)"
+          class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+          style="background:var(--mid);border:1.5px solid var(--border)"
+          onmouseover="this.style.background='var(--mid2)'" onmouseout="this.style.background='var(--mid)'">
+          ↻ Refresh
+        </button>
+        <button onclick="openModal('dept-modal')"
+          class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+          style="background:var(--ink);color:var(--paper)"
+          onmouseover="this.style.background='var(--accent)'" onmouseout="this.style.background='var(--ink)'">
+          Dept Breakdown
+        </button>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="overflow-auto rounded-lg" style="border:1px solid var(--border)">
+      <table class="w-full min-w-[780px]">
+        <thead style="background:var(--mid)">
+          <tr class="text-xs uppercase tracking-wider text-left" style="color:var(--muted)">
+            <th class="px-4 py-3 font-semibold">Invoice #</th>
+            <th class="px-4 py-3 font-semibold">Supplier</th>
+            <th class="px-4 py-3 font-semibold">Department</th>
+            <th class="px-4 py-3 text-right font-semibold">Excl. VAT</th>
+            <th class="px-4 py-3 text-right font-semibold">VAT</th>
+            <th class="px-4 py-3 text-right font-semibold">Incl. VAT</th>
+            <th class="px-4 py-3 font-semibold">Date</th>
+            <th class="px-4 py-3 font-semibold">Status</th>
+          </tr>
+        </thead>
+        <tbody id="inv-tbody">
+          <tr><td colspan="8" class="text-center py-14 text-sm" style="color:var(--border)">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="flex items-center justify-between">
+      <p id="page-info" class="text-xs mono" style="color:var(--muted)"></p>
+      <div class="flex items-center gap-1" id="page-btns"></div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ══════════════════════════════════════════════════════════
+     MODALS
+══════════════════════════════════════════════════════════ -->
+
+<!-- Invoice detail modal -->
+<div id="detail-modal" onclick="bgClose(event,'detail-modal')"
+  class="overlay hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+  style="background:rgba(17,17,16,.45)">
+  <div class="modal-box bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
+    <div class="flex items-center justify-between px-6 py-5" style="border-bottom:1.5px solid var(--border)">
+      <div>
+        <p class="text-xs uppercase tracking-widest mb-1" style="color:var(--muted)">Invoice Detail</p>
+        <h3 class="serif text-xl font-semibold" id="d-title">—</h3>
+      </div>
+      <button onclick="closeModal('detail-modal')"
+        class="w-8 h-8 rounded-full flex items-center justify-center text-lg transition-colors"
+        style="color:var(--muted)"
+        onmouseover="this.style.background='var(--mid)'" onmouseout="this.style.background='transparent'">×</button>
+    </div>
+    <div class="px-6 py-5 space-y-5">
+      <!-- Status banner -->
+      <div id="d-status-banner" class="rounded-lg px-4 py-2.5 flex items-center gap-2">
+        <span id="d-status-dot" class="w-2 h-2 rounded-full flex-shrink-0"></span>
+        <span id="d-status-text" class="text-sm font-semibold uppercase tracking-wide"></span>
+        <span id="d-status-note" class="text-xs ml-auto" style="color:var(--muted)"></span>
+      </div>
+      <!-- Grid of fields -->
+      <div class="grid grid-cols-2 gap-4 dl">
+        <div><dt>Supplier</dt><dd id="d-supplier"></dd></div>
+        <div><dt>Supplier #</dt><dd id="d-sup-num"></dd></div>
+        <div><dt>Department</dt><dd id="d-dept"></dd></div>
+        <div><dt>Invoice Date</dt><dd id="d-date"></dd></div>
+        <div><dt>Excl. VAT</dt><dd id="d-excl"></dd></div>
+        <div><dt>VAT</dt><dd id="d-vat"></dd></div>
+        <div><dt>Incl. VAT</dt><dd id="d-incl" class="text-base font-semibold"></dd></div>
+        <div><dt>Ingested</dt><dd id="d-ts"></dd></div>
+      </div>
+      <!-- Source -->
+      <div class="rounded-lg p-3 space-y-1" style="background:var(--mid)">
+        <p class="text-xs uppercase tracking-widest mb-2" style="color:var(--muted)">Source</p>
+        <p class="text-xs mono" id="d-file" style="color:var(--ink)"></p>
+        <p class="text-xs mono truncate" id="d-hash" style="color:var(--muted)"></p>
+      </div>
+    </div>
+    <div class="px-6 pb-5 flex justify-end">
+      <button onclick="closeModal('detail-modal')"
+        class="px-5 py-2 rounded-lg text-sm font-semibold transition-colors"
+        style="background:var(--ink);color:var(--paper)"
+        onmouseover="this.style.background='var(--accent)'" onmouseout="this.style.background='var(--ink)'">
+        Close
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Department breakdown modal -->
+<div id="dept-modal" onclick="bgClose(event,'dept-modal')"
+  class="overlay hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+  style="background:rgba(17,17,16,.45)">
+  <div class="modal-box bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-5" style="border-bottom:1.5px solid var(--border)">
+      <div>
+        <p class="text-xs uppercase tracking-widest mb-1" style="color:var(--muted)">By Department</p>
+        <h3 class="serif text-xl font-semibold">Spend Breakdown</h3>
+      </div>
+      <button onclick="closeModal('dept-modal')"
+        class="w-8 h-8 rounded-full flex items-center justify-center text-lg transition-colors"
+        style="color:var(--muted)"
+        onmouseover="this.style.background='var(--mid)'" onmouseout="this.style.background='transparent'">×</button>
+    </div>
+    <div class="px-6 py-5">
+      <div id="dept-chart" class="space-y-4">
+        <p class="text-sm text-center py-8" style="color:var(--border)">Loading…</p>
+      </div>
+    </div>
+    <div class="px-6 pb-5 flex justify-end">
+      <button onclick="closeModal('dept-modal')"
+        class="px-5 py-2 rounded-lg text-sm font-semibold transition-colors"
+        style="background:var(--ink);color:var(--paper)"
+        onmouseover="this.style.background='var(--accent)'" onmouseout="this.style.background='var(--ink)'">
+        Close
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- CSV format modal -->
+<div id="csv-modal" onclick="bgClose(event,'csv-modal')"
+  class="overlay hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+  style="background:rgba(17,17,16,.45)">
+  <div class="modal-box bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
+    <div class="flex items-center justify-between px-6 pt-6 pb-4" style="border-bottom:1.5px solid var(--border)">
+      <div>
+        <h3 class="serif text-xl font-semibold">CSV File Format</h3>
+        <p class="text-xs mt-0.5" style="color:var(--muted)">What your spreadsheet needs to include</p>
+      </div>
+      <button onclick="closeModal('csv-modal')"
+        class="w-8 h-8 rounded-full flex items-center justify-center text-lg transition-colors"
+        style="color:var(--muted)"
+        onmouseover="this.style.background='var(--mid)'" onmouseout="this.style.background='transparent'">×</button>
+    </div>
+    <div class="px-6 py-5 space-y-6">
+      <div class="space-y-3">
+        <p class="text-xs uppercase tracking-widest font-semibold" style="color:var(--muted)">Required columns</p>
+        <div class="flex flex-wrap gap-2">
+          <span class="col-pill"><span class="req-dot" style="background:var(--accent)"></span>supplier_number</span>
+          <span class="col-pill"><span class="req-dot" style="background:var(--accent)"></span>supplier_name</span>
+          <span class="col-pill"><span class="req-dot" style="background:var(--accent)"></span>invoice_number</span>
+          <span class="col-pill"><span class="req-dot" style="background:var(--accent)"></span>department</span>
+          <span class="col-pill"><span class="req-dot" style="background:var(--accent)"></span>invoice_date</span>
+          <span class="col-pill"><span class="req-dot" style="background:var(--accent)"></span>amount_excl</span>
         </div>
-
-        <!-- Example -->
-        <div class="space-y-2">
-          <h3 class="font-semibold text-sm uppercase tracking-wider text-gray-500">Example</h3>
-          <pre class="mono text-xs bg-[var(--ink)] text-green-300 rounded-xl p-4 overflow-auto leading-relaxed">supplier_number,supplier_name,invoice_number,department,invoice_date,amount_excl,vat_rate
+      </div>
+      <div class="space-y-3">
+        <p class="text-xs uppercase tracking-widest font-semibold" style="color:var(--muted)">Optional columns</p>
+        <div class="flex flex-wrap gap-2">
+          <span class="col-pill"><span class="req-dot" style="background:var(--border)"></span>vat_rate</span>
+          <span class="col-pill"><span class="req-dot" style="background:var(--border)"></span>vat</span>
+          <span class="col-pill"><span class="req-dot" style="background:var(--border)"></span>amount_incl</span>
+        </div>
+        <p class="text-xs leading-relaxed" style="color:var(--muted)">
+          <span class="mono" style="color:var(--ink)">vat_rate</span> defaults to 15% (SA) if omitted.
+          <span class="mono" style="color:var(--ink)">amount_incl</span> is calculated automatically.
+        </p>
+      </div>
+      <div class="space-y-2">
+        <p class="text-xs uppercase tracking-widest font-semibold" style="color:var(--muted)">Validation</p>
+        <ul class="space-y-2 text-sm" style="color:#555">
+          <li class="flex gap-2"><span style="color:var(--green);font-weight:700">✓</span><span><span class="mono text-xs">invoice_date</span> must be YYYY-MM-DD and cannot be a future date.</span></li>
+          <li class="flex gap-2"><span style="color:var(--green);font-weight:700">✓</span><span>Duplicate invoices (same supplier + invoice number) are automatically skipped.</span></li>
+          <li class="flex gap-2"><span style="color:var(--green);font-weight:700">✓</span><span>Amounts rounded to 2 decimal places. VAT checked within ±R 0.01.</span></li>
+        </ul>
+      </div>
+      <div class="space-y-2">
+        <p class="text-xs uppercase tracking-widest font-semibold" style="color:var(--muted)">Example</p>
+        <pre class="mono text-xs rounded-xl p-4 overflow-auto leading-relaxed" style="background:var(--ink);color:#86efac">supplier_number,supplier_name,invoice_number,department,invoice_date,amount_excl,vat_rate
 S009,OfficeCo,OC-22119,Ops,2025-10-28,2175.00,15
 S009,OfficeCo,OC-22120,Sales,2025-10-29,450.00,15
 S011,PaperMart,PM-77891,Ops,2025-11-01,1020.00,15</pre>
-        </div>
-
-      </div>
-
-      <!-- Modal footer -->
-      <div class="px-6 pb-6 pt-2 flex items-center justify-between gap-3">
-        <button
-          onclick="downloadSampleCsv()"
-          class="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-[var(--ink)]
-                 transition-colors font-medium"
-        >
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 20 20">
-            <path d="M10 3v9m0 0l-3-3m3 3l3-3M4 15h12"
-              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          Download sample file
-        </button>
-        <button
-          onclick="closeCsvModal()"
-          class="px-5 py-2 rounded-lg bg-[var(--ink)] text-[var(--paper)] text-sm font-semibold
-                 hover:bg-[var(--accent)] transition-colors"
-        >Got it</button>
       </div>
     </div>
+    <div class="px-6 pb-6 pt-1 flex items-center justify-between gap-3">
+      <button onclick="downloadSampleCsv()"
+        class="inline-flex items-center gap-2 text-sm font-medium transition-colors"
+        style="color:var(--muted)"
+        onmouseover="this.style.color='var(--ink)'" onmouseout="this.style.color='var(--muted)'">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 20 20">
+          <path d="M10 3v9m0 0l-3-3m3 3l3-3M4 15h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Download sample file
+      </button>
+      <button onclick="closeModal('csv-modal')"
+        class="px-5 py-2 rounded-lg text-sm font-semibold transition-colors"
+        style="background:var(--ink);color:var(--paper)"
+        onmouseover="this.style.background='var(--accent)'" onmouseout="this.style.background='var(--ink)'">
+        Got it
+      </button>
+    </div>
   </div>
+</div>
 
-  <!-- Toast -->
-  <div id="toast"
-    class="fixed bottom-6 right-6 px-5 py-3 rounded-xl shadow-xl text-sm font-medium max-w-sm z-50 hidden"
-    role="alert">
-  </div>
+<!-- Toast -->
+<div id="toast" class="hidden fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-xl text-sm font-medium max-w-xs" role="alert"></div>
 
-  <!-- ════════════════════════════════════════════════════════════════════
-       Script
-  ════════════════════════════════════════════════════════════════════ -->
-  <script>
-    const API       = 'https://invoice-ingest.onrender.com/api';
-    const PAGE_SIZE = 20;
+<!-- ══════════════════════════════════════════════════════════
+     SCRIPT
+══════════════════════════════════════════════════════════ -->
+<script>
+  const API       = 'https://invoice-ingest.onrender.com/api';
+  const PAGE_SIZE = 15;
 
-    let currentPage  = 1;
-    let selectedFile = null;
-    let searchTimer  = null;
+  let currentPage  = 1;
+  let totalPages   = 1;
+  let selectedFile = null;
+  let searchTimer  = null;
+  let dryRun       = false;
+  let allRows      = []; // cache for dept chart
 
-    // ── Stats ─────────────────────────────────────────────────────────────────
-    async function loadStats() {
-      try {
-        const d = await fetch(`${API}/invoices/stats`).then(r => r.json());
-        document.getElementById('stat-total').textContent     = d.total     ?? '—';
-        document.getElementById('stat-inserted').textContent  = d.inserted  ?? '—';
-        document.getElementById('stat-duplicate').textContent = d.duplicate ?? '—';
-        document.getElementById('stat-failed').textContent    = d.failed    ?? '—';
-      } catch { /* silently ignore */ }
+  // ── Dry run toggle ──────────────────────────────────────────────────────
+  function toggleDryRun() {
+    dryRun = !dryRun;
+    const track = document.getElementById('dry-run-track');
+    const thumb = document.getElementById('dry-run-thumb');
+    track.style.background = dryRun ? 'var(--accent)' : 'var(--muted)';
+    thumb.style.transform  = dryRun ? 'translateX(16px)' : 'translateX(0)';
+  }
+
+  // ── Stats ───────────────────────────────────────────────────────────────
+  async function loadStats() {
+    try {
+      const d = await fetch(`${API}/invoices/stats`).then(r => r.json());
+      document.getElementById('s-total').textContent    = fmt(d.total)    ?? '—';
+      document.getElementById('s-inserted').textContent = fmt(d.inserted) ?? '—';
+      document.getElementById('s-dup').textContent      = fmt(d.duplicate)?? '—';
+      document.getElementById('s-failed').textContent   = fmt(d.failed)   ?? '—';
+    } catch {}
+  }
+  function fmt(n) { return n == null ? null : Number(n).toLocaleString('en-ZA'); }
+
+  // ── Invoice table ───────────────────────────────────────────────────────
+  async function loadInvoices(page = 1) {
+    if (page < 1 || page > totalPages && totalPages > 0) return;
+    currentPage = page;
+
+    const status = document.getElementById('status-filter').value;
+    const search = document.getElementById('search-input').value.trim();
+    const params = new URLSearchParams({ page, limit: PAGE_SIZE });
+    if (status) params.set('status', status);
+    if (search)  params.set('search', search);
+
+    const tbody = document.getElementById('inv-tbody');
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-14 text-sm" style="color:var(--border)">
+      Loading<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+    </td></tr>`;
+
+    try {
+      const { rows, total } = await fetch(`${API}/invoices?${params}`).then(r => r.json());
+      allRows = rows;
+      totalPages = Math.ceil(total / PAGE_SIZE) || 1;
+      renderTable(rows);
+      renderPagination(page, total);
+    } catch {
+      tbody.innerHTML = `<tr><td colspan="8" class="text-center py-14 text-sm" style="color:var(--red)">Could not load records.</td></tr>`;
     }
+  }
 
-    // ── Invoice table ─────────────────────────────────────────────────────────
-    async function loadInvoices(page = 1) {
-      if (page < 1) return;
-      currentPage = page;
+  function renderTable(rows) {
+    const tbody = document.getElementById('inv-tbody');
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="8" class="text-center py-14 text-sm" style="color:var(--border)">No records found.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map((r, i) => `
+      <tr class="inv-row slide-up" style="animation-delay:${i * 0.02}s" onclick="openDetail(${i})">
+        <td class="px-4 py-3 mono font-medium text-sm">${esc(r.invoice_number)}</td>
+        <td class="px-4 py-3">
+          <div class="font-medium">${esc(r.supplier_name)}</div>
+          <div class="text-xs mono" style="color:var(--muted)">${esc(r.supplier_number)}</div>
+        </td>
+        <td class="px-4 py-3 text-sm" style="color:#555">${esc(r.department)}</td>
+        <td class="px-4 py-3 text-right mono text-sm">R&nbsp;${amt(r.amount_excl_vat)}</td>
+        <td class="px-4 py-3 text-right mono text-sm" style="color:var(--muted)">R&nbsp;${amt(r.vat)}</td>
+        <td class="px-4 py-3 text-right mono text-sm font-semibold">R&nbsp;${amt(r.amount_incl_vat)}</td>
+        <td class="px-4 py-3 mono text-xs" style="color:#555">${r.invoice_date?.slice(0,10)??'—'}</td>
+        <td class="px-4 py-3">
+          <span class="b-${r.status==='inserted'?'ins':r.status==='duplicate'?'dup':'fail'} rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide">
+            ${r.status}
+          </span>
+        </td>
+      </tr>`).join('');
+  }
 
-      const status = document.getElementById('status-filter').value;
-      const search = document.getElementById('search-input').value.trim();
-      const params = new URLSearchParams({ page, limit: PAGE_SIZE });
-      if (status) params.set('status', status);
-      if (search)  params.set('search', search);
+  function renderPagination(page, total) {
+    totalPages = Math.ceil(total / PAGE_SIZE) || 1;
+    const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+    const to   = Math.min(page * PAGE_SIZE, total);
+    document.getElementById('page-info').textContent =
+      total === 0 ? 'No records' : `${from}–${to} of ${total.toLocaleString('en-ZA')}`;
 
-      const tbody = document.getElementById('invoice-tbody');
-      tbody.innerHTML = `<tr><td colspan="8" class="text-center py-12 text-gray-300 text-sm">
-        Loading<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
-      </td></tr>`;
+    const btns = document.getElementById('page-btns');
+    btns.innerHTML = '';
 
-      try {
-        const { rows, total } = await fetch(`${API}/invoices?${params}`).then(r => r.json());
-        renderInvoiceRows(rows);
-        renderPagination(page, total);
-      } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-12 text-[var(--accent)] text-sm">
-          Could not load records
-        </td></tr>`;
+    // Prev
+    const prev = btn('←', page <= 1, () => loadInvoices(page - 1));
+    btns.appendChild(prev);
+
+    // Page numbers — show up to 5 around current
+    const range = pageRange(page, totalPages);
+    range.forEach(p => {
+      if (p === '…') {
+        const el = document.createElement('span');
+        el.textContent = '…';
+        el.className = 'px-2 text-sm';
+        el.style.color = 'var(--muted)';
+        btns.appendChild(el);
+      } else {
+        const el = btn(p, false, () => loadInvoices(p));
+        if (p === page) {
+          el.style.background = 'var(--ink)';
+          el.style.color      = 'var(--paper)';
+          el.style.borderColor= 'var(--ink)';
+        }
+        btns.appendChild(el);
       }
-    }
-
-    function renderInvoiceRows(rows) {
-      const tbody = document.getElementById('invoice-tbody');
-      if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-12 text-gray-300 text-sm">No records found.</td></tr>`;
-        return;
-      }
-      tbody.innerHTML = rows.map(r => `
-        <tr>
-          <td class="px-4 py-3 mono font-medium">${esc(r.invoice_number)}</td>
-          <td class="px-4 py-3">
-            <div class="font-medium leading-tight">${esc(r.supplier_name)}</div>
-            <div class="text-xs text-gray-400 mono">${esc(r.supplier_number)}</div>
-          </td>
-          <td class="px-4 py-3 text-gray-600">${esc(r.department)}</td>
-          <td class="px-4 py-3 text-right mono">R&nbsp;${fmtAmt(r.amount_excl_vat)}</td>
-          <td class="px-4 py-3 text-right mono text-gray-500">R&nbsp;${fmtAmt(r.vat)}</td>
-          <td class="px-4 py-3 text-right mono font-semibold">R&nbsp;${fmtAmt(r.amount_incl_vat)}</td>
-          <td class="px-4 py-3 mono text-sm text-gray-600">${r.invoice_date?.slice(0,10) ?? '—'}</td>
-          <td class="px-4 py-3">
-            <span class="badge-${r.status} rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide">
-              ${r.status}
-            </span>
-          </td>
-        </tr>`).join('');
-    }
-
-    function renderPagination(page, total) {
-      const pages = Math.ceil(total / PAGE_SIZE);
-      const from  = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-      const to    = Math.min(page * PAGE_SIZE, total);
-      document.getElementById('pagination-info').textContent =
-        total === 0 ? 'No records' : `${from}–${to} of ${total}`;
-      document.getElementById('prev-btn').disabled = page <= 1;
-      document.getElementById('next-btn').disabled = page >= pages;
-    }
-
-    // ── File upload ───────────────────────────────────────────────────────────
-    const dropzone  = document.getElementById('dropzone');
-    const fileInput = document.getElementById('file-input');
-    const submitBtn = document.getElementById('submit-btn');
-    const progressW = document.getElementById('progress-wrap');
-    const progressB = document.getElementById('progress-bar');
-
-    dropzone.addEventListener('dragover',  e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
-    dropzone.addEventListener('dragleave', ()  => dropzone.classList.remove('drag-over'));
-    dropzone.addEventListener('drop', e => {
-      e.preventDefault();
-      dropzone.classList.remove('drag-over');
-      if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
-    });
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files[0]) setFile(fileInput.files[0]);
-    });
-
-    function setFile(file) {
-      if (!file.name.toLowerCase().endsWith('.csv')) {
-        showToast('Please upload a .csv file.', 'error');
-        return;
-      }
-      selectedFile = file;
-      document.getElementById('file-name').textContent =
-        `${file.name}  (${(file.size / 1024).toFixed(1)} KB)`;
-      document.getElementById('file-info').classList.remove('hidden');
-      submitBtn.disabled = false;
-    }
-
-    function clearFile() {
-      selectedFile      = null;
-      fileInput.value   = '';
-      document.getElementById('file-info').classList.add('hidden');
-      submitBtn.disabled = true;
-    }
-
-    async function submitFile() {
-      if (!selectedFile) return;
-
-      const dryRun   = document.getElementById('dry-run-toggle').checked;
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-
-      submitBtn.disabled = true;
-      progressW.classList.remove('hidden');
-      progressB.style.width = '15%';
-
-      try {
-        progressB.style.width = '55%';
-        const res  = await fetch(`${API}/ingest?dryRun=${dryRun}`, { method: 'POST', body: formData });
-        progressB.style.width = '90%';
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Ingest failed');
-
-        progressB.style.width = '100%';
-        setTimeout(() => { progressW.classList.add('hidden'); progressB.style.width = '0%'; }, 500);
-
-        renderRunResult(data);
-        showToast(
-          `Done — ${data.metrics.inserted} inserted · ${data.metrics.duplicates} dup · ${data.metrics.failed} failed`,
-          'success'
-        );
-        loadStats();
-        loadInvoices(1);
-
-      } catch (err) {
-        progressW.classList.add('hidden');
-        progressB.style.width = '0%';
-        showToast(err.message, 'error');
-      } finally {
-        submitBtn.disabled = false;
-      }
-    }
-
-    function renderRunResult(data) {
-      document.getElementById('run-placeholder').classList.add('hidden');
-      const el = document.getElementById('run-result');
-      el.classList.remove('hidden', 'fade-up');
-      void el.offsetWidth;
-      el.classList.add('fade-up');
-
-      document.getElementById('run-inserted').textContent = data.metrics.inserted;
-      document.getElementById('run-dup').textContent      = data.metrics.duplicates;
-      document.getElementById('run-failed').textContent   = data.metrics.failed;
-      document.getElementById('run-meta').textContent =
-        `${data.fileName}  ·  ${data.metrics.processed} rows  ·  ${data.duration}ms` +
-        (data.dryRun ? '  ·  DRY-RUN' : '');
-
-      document.getElementById('run-rows').innerHTML = data.results.map(r => `
-        <tr>
-          <td class="px-3 py-2 mono text-gray-400">${r.row}</td>
-          <td class="px-3 py-2 mono">${esc(r.invoice_number)}</td>
-          <td class="px-3 py-2 mono">${esc(r.supplier_number)}</td>
-          <td class="px-3 py-2">
-            <span class="badge-${r.status} rounded-full px-2 py-0.5 text-xs font-semibold uppercase">
-              ${r.status}
-            </span>
-          </td>
-          <td class="px-3 py-2 text-gray-500 max-w-[180px] truncate" title="${esc(r.validation_notes ?? '')}">
-            ${r.validation_notes ? esc(r.validation_notes) : '—'}
-          </td>
-        </tr>`).join('');
-    }
-
-    // ── CSV modal ─────────────────────────────────────────────────────────────
-    function openCsvModal() {
-      const modal = document.getElementById('csv-modal');
-      modal.classList.remove('hidden');
-      document.body.style.overflow = 'hidden';
-    }
-
-    function closeCsvModal(e) {
-      // Close on backdrop click or explicit call
-      if (e && e.target !== document.getElementById('csv-modal')) return;
-      const modal = document.getElementById('csv-modal');
-      modal.classList.add('hidden');
-      document.body.style.overflow = '';
-    }
-
-    // Escape key closes modal
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') closeCsvModal();
     });
 
-    // ── Sample download ───────────────────────────────────────────────────────
-    function downloadSampleCsv() {
-      const csv = [
-        'supplier_number,supplier_name,invoice_number,department,invoice_date,amount_excl,vat_rate',
-        'S009,OfficeCo,OC-22119,Ops,2025-10-28,2175.00,15',
-        'S009,OfficeCo,OC-22120,Sales,2025-10-29,450.00,15',
-        'S011,PaperMart,PM-77891,Ops,2025-11-01,1020.00,15',
-      ].join('\n');
-      const a    = document.createElement('a');
-      a.href     = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-      a.download = 'supplier_batch.csv';
-      a.click();
-    }
+    // Next
+    const next = btn('→', page >= totalPages, () => loadInvoices(page + 1));
+    btns.appendChild(next);
+  }
 
-    // ── Toast ─────────────────────────────────────────────────────────────────
-    let toastTimer;
-    function showToast(msg, type = 'info') {
-      const t = document.getElementById('toast');
-      const palette = {
-        success: 'bg-[var(--green)] text-white',
-        error:   'bg-[var(--accent)] text-white',
-        info:    'bg-[var(--ink)] text-[var(--paper)]',
-      };
-      t.className =
-        `fixed bottom-6 right-6 px-5 py-3 rounded-xl shadow-xl text-sm font-medium max-w-sm z-50 ` +
-        (palette[type] ?? palette.info);
-      t.textContent = msg;
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => t.classList.add('hidden'), 4500);
+  function btn(label, disabled, onClick) {
+    const el = document.createElement('button');
+    el.textContent = label;
+    el.disabled    = disabled;
+    el.className   = 'w-8 h-8 rounded-lg text-sm font-medium transition-colors';
+    el.style.cssText = `border:1.5px solid var(--border);background:white;color:var(--ink);opacity:${disabled?'.3':'1'};cursor:${disabled?'not-allowed':'pointer'}`;
+    if (!disabled) {
+      el.addEventListener('click', onClick);
+      el.addEventListener('mouseover', () => el.style.background = 'var(--mid)');
+      el.addEventListener('mouseout',  () => { if(el.style.background !== 'var(--ink)') el.style.background = 'white'; });
     }
+    return el;
+  }
 
-    // ── Search debounce ───────────────────────────────────────────────────────
-    function debounceSearch() {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => loadInvoices(1), 350);
-    }
+  function pageRange(cur, total) {
+    if (total <= 7) return Array.from({length:total},(_,i)=>i+1);
+    if (cur <= 4)   return [1,2,3,4,5,'…',total];
+    if (cur >= total-3) return [1,'…',total-4,total-3,total-2,total-1,total];
+    return [1,'…',cur-1,cur,cur+1,'…',total];
+  }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    function esc(s) {
-      return String(s ?? '')
-        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    }
-    function fmtAmt(n) {
-      return Number(n ?? 0).toLocaleString('en-ZA', {
-        minimumFractionDigits: 2, maximumFractionDigits: 2,
+  // ── Invoice detail modal ────────────────────────────────────────────────
+  function openDetail(idx) {
+    const r = allRows[idx];
+    if (!r) return;
+
+    document.getElementById('d-title').textContent    = r.invoice_number;
+    document.getElementById('d-supplier').textContent = r.supplier_name;
+    document.getElementById('d-sup-num').textContent  = r.supplier_number;
+    document.getElementById('d-dept').textContent     = r.department;
+    document.getElementById('d-date').textContent     = r.invoice_date?.slice(0,10) ?? '—';
+    document.getElementById('d-excl').textContent     = `R ${amt(r.amount_excl_vat)}`;
+    document.getElementById('d-vat').textContent      = `R ${amt(r.vat)}`;
+    document.getElementById('d-incl').textContent     = `R ${amt(r.amount_incl_vat)}`;
+    document.getElementById('d-ts').textContent       = r.ingest_timestamp
+      ? new Date(r.ingest_timestamp).toLocaleString('en-ZA',{timeZone:'Africa/Johannesburg'}) : '—';
+    document.getElementById('d-file').textContent     = r.source_file_name ?? '—';
+    document.getElementById('d-hash').textContent     = r.source_hash ? `SHA-256: ${r.source_hash}` : '';
+
+    const configs = {
+      inserted:  { bg:'var(--green-bg)',  dot:'var(--green)',  text:'Inserted'  },
+      duplicate: { bg:'var(--amber-bg)',  dot:'var(--amber)',  text:'Duplicate' },
+      failed:    { bg:'var(--red-bg)',    dot:'var(--red)',    text:'Failed'    },
+    };
+    const cfg = configs[r.status] || configs.inserted;
+    const banner = document.getElementById('d-status-banner');
+    banner.style.background = cfg.bg;
+    document.getElementById('d-status-dot').style.background = cfg.dot;
+    document.getElementById('d-status-text').textContent = cfg.text;
+    document.getElementById('d-status-text').style.color = cfg.dot;
+    document.getElementById('d-status-note').textContent  = r.validation_notes ?? '';
+
+    openModal('detail-modal');
+  }
+
+  // ── Dept breakdown modal ────────────────────────────────────────────────
+  async function openDeptModal() {
+    openModal('dept-modal');
+    const el = document.getElementById('dept-chart');
+    el.innerHTML = `<p class="text-sm text-center py-8" style="color:var(--border)">Loading<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p>`;
+
+    try {
+      // Fetch all inserted invoices (up to 500 for chart)
+      const { rows } = await fetch(`${API}/invoices?status=inserted&limit=500&page=1`).then(r => r.json());
+
+      // Aggregate by department
+      const depts = {};
+      rows.forEach(r => {
+        const d = r.department || 'Unknown';
+        depts[d] = (depts[d] || 0) + Number(r.amount_incl_vat || 0);
       });
-    }
 
-    // ── Init ──────────────────────────────────────────────────────────────────
-    loadStats();
-    loadInvoices(1);
-    setInterval(loadStats,                  60_000);
-    setInterval(() => loadInvoices(currentPage), 60_000);
-  </script>
+      const sorted = Object.entries(depts).sort((a,b) => b[1]-a[1]);
+      const max    = sorted[0]?.[1] || 1;
+
+      if (!sorted.length) {
+        el.innerHTML = `<p class="text-sm text-center py-8" style="color:var(--border)">No data yet.</p>`;
+        return;
+      }
+
+      el.innerHTML = sorted.map(([dept, total]) => `
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium">${esc(dept)}</span>
+            <span class="mono text-xs" style="color:var(--muted)">R ${amt(total)}</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill" style="width:${(total/max*100).toFixed(1)}%"></div>
+          </div>
+        </div>`).join('');
+    } catch {
+      el.innerHTML = `<p class="text-sm text-center py-8" style="color:var(--red)">Could not load data.</p>`;
+    }
+  }
+
+  // ── File upload ─────────────────────────────────────────────────────────
+  const dropzone  = document.getElementById('dropzone');
+  const fileInput = document.getElementById('file-input');
+  const submitBtn = document.getElementById('submit-btn');
+  const progWrap  = document.getElementById('prog-wrap');
+  const progBar   = document.getElementById('prog-bar');
+
+  dropzone.addEventListener('dragover',  e => { e.preventDefault(); dropzone.classList.add('over'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('over'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault(); dropzone.classList.remove('over');
+    if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+
+  function setFile(file) {
+    if (!file.name.toLowerCase().endsWith('.csv')) { showToast('Please upload a .csv file.','error'); return; }
+    selectedFile = file;
+    document.getElementById('file-name').textContent = `${file.name}  (${(file.size/1024).toFixed(1)} KB)`;
+    const fi = document.getElementById('file-info');
+    fi.style.display = 'flex'; fi.classList.remove('hidden');
+    submitBtn.disabled = false;
+    submitBtn.style.opacity = '1'; submitBtn.style.cursor = 'pointer';
+  }
+
+  function clearFile() {
+    selectedFile = null; fileInput.value = '';
+    const fi = document.getElementById('file-info');
+    fi.style.display = 'none'; fi.classList.add('hidden');
+    submitBtn.disabled = true; submitBtn.style.opacity = '.25'; submitBtn.style.cursor = 'not-allowed';
+  }
+
+  async function submitFile() {
+    if (!selectedFile) return;
+    const fd = new FormData(); fd.append('file', selectedFile);
+    submitBtn.disabled = true; submitBtn.style.opacity = '.5';
+    progWrap.classList.remove('hidden'); progBar.style.width = '15%';
+
+    try {
+      progBar.style.width = '55%';
+      const res  = await fetch(`${API}/ingest?dryRun=${dryRun}`, { method:'POST', body:fd });
+      progBar.style.width = '90%';
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Ingest failed');
+
+      progBar.style.width = '100%';
+      setTimeout(() => { progWrap.classList.add('hidden'); progBar.style.width = '0%'; }, 500);
+
+      renderRunResult(data);
+      showToast(`Done — ${data.metrics.inserted} inserted · ${data.metrics.duplicates} dup · ${data.metrics.failed} failed`, 'success');
+      loadStats(); loadInvoices(1);
+    } catch (err) {
+      progWrap.classList.add('hidden'); progBar.style.width = '0%';
+      showToast(err.message, 'error');
+    } finally {
+      submitBtn.disabled = false; submitBtn.style.opacity = '1';
+    }
+  }
+
+  function renderRunResult(data) {
+    document.getElementById('run-empty').classList.add('hidden');
+    const el = document.getElementById('run-result');
+    el.classList.remove('hidden','slide-up'); void el.offsetWidth; el.classList.add('slide-up');
+
+    document.getElementById('r-ins').textContent  = data.metrics.inserted;
+    document.getElementById('r-dup').textContent  = data.metrics.duplicates;
+    document.getElementById('r-fail').textContent = data.metrics.failed;
+    document.getElementById('r-meta').textContent =
+      `${data.fileName} · ${data.metrics.processed} rows · ${data.duration}ms${data.dryRun?' · DRY-RUN':''}`;
+
+    document.getElementById('r-rows').innerHTML = data.results.map(r => `
+      <tr>
+        <td class="px-3 py-2 mono" style="color:var(--muted)">${r.row}</td>
+        <td class="px-3 py-2 mono">${esc(r.invoice_number)}</td>
+        <td class="px-3 py-2 mono">${esc(r.supplier_number)}</td>
+        <td class="px-3 py-2">
+          <span class="b-${r.status==='inserted'?'ins':r.status==='duplicate'?'dup':'fail'} rounded-full px-2 py-0.5 text-xs font-semibold uppercase">${r.status}</span>
+        </td>
+        <td class="px-3 py-2 max-w-[160px] truncate" style="color:var(--muted)" title="${esc(r.validation_notes??'')}">${r.validation_notes?esc(r.validation_notes):'—'}</td>
+      </tr>`).join('');
+  }
+
+  // ── Modals ──────────────────────────────────────────────────────────────
+  function openModal(id) {
+    if (id === 'dept-modal') { openDeptModal(); return; }
+    const el = document.getElementById(id);
+    el.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+  function bgClose(e, id) {
+    if (e.target === document.getElementById(id)) closeModal(id);
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') ['detail-modal','dept-modal','csv-modal'].forEach(closeModal);
+  });
+
+  // ── Toast ───────────────────────────────────────────────────────────────
+  let toastTimer;
+  function showToast(msg, type='info') {
+    const t = document.getElementById('toast');
+    const colors = { success:`background:var(--green);color:white`, error:`background:var(--red);color:white`, info:`background:var(--ink);color:var(--paper)` };
+    t.style.cssText = `${colors[type]??colors.info};`;
+    t.className = 'fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-xl text-sm font-medium max-w-xs';
+    t.textContent = msg;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.add('hidden'), 4500);
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────
+  function debounceSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => loadInvoices(1), 350);
+  }
+  function esc(s) {
+    return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function amt(n) {
+    return Number(n??0).toLocaleString('en-ZA',{minimumFractionDigits:2,maximumFractionDigits:2});
+  }
+  function downloadSampleCsv() {
+    const csv = ['supplier_number,supplier_name,invoice_number,department,invoice_date,amount_excl,vat_rate',
+      'S009,OfficeCo,OC-22119,Ops,2025-10-28,2175.00,15','S009,OfficeCo,OC-22120,Sales,2025-10-29,450.00,15',
+      'S011,PaperMart,PM-77891,Ops,2025-11-01,1020.00,15'].join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+    a.download = 'supplier_batch.csv'; a.click();
+  }
+
+  // ── Init ────────────────────────────────────────────────────────────────
+  loadStats();
+  loadInvoices(1);
+  setInterval(loadStats, 60_000);
+  setInterval(() => loadInvoices(currentPage), 60_000);
+</script>
 </body>
 </html>
