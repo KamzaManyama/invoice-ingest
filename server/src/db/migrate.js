@@ -10,13 +10,13 @@ const pool = mysql.createPool({
   user:               process.env.DB_USER,
   password:           process.env.DB_PASSWORD,
   waitForConnections: true,
-  connectionLimit:    10,
-  queueLimit:         0,
+  connectionLimit:    2,    
+  queueLimit:         10,   
   timezone:           '+02:00',
   decimalNumbers:     true,
 });
  
-// Test the connection on startup so you know immediately if credentials are wrong
+// Test the connection on startup
 pool.getConnection()
   .then(conn => {
     console.log(`[db] Connected to MySQL → ${process.env.DB_HOST}/${process.env.DB_NAME}`);
