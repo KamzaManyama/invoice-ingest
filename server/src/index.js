@@ -17,7 +17,7 @@ const PORT = process.env.PORT || 3001;
 // ── Security & logging ──────────────────────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'https://kamzamanyama.github.io/invoice-ingest/',
+  origin: process.env.CORS_ORIGIN || 'https://kamzamanyama.github.io',
   methods: ['GET', 'POST'],
 }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
