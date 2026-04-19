@@ -3,7 +3,6 @@
 A full-stack web application for ingesting supplier invoices from CSV files. Validates each row against South African business rules, stores valid records in MySQL, and sends Gmail alert emails after every run.
 
 **Live Demo:** https://yourusername.github.io/your-repo
-**API:** https://your-app.onrender.com
 
 ---
 
