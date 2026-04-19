@@ -1,0 +1,21 @@
+supplier_number,supplier_name,invoice_number,department,invoice_date,amount_excl,vat_rate
+S001,Acme Supplies,ACM-1001,Operations,2025-01-15,5000.00,15
+S001,Acme Supplies,ACM-1002,Finance,2025-02-10,1200.50,15
+S002,Bold Stationery,BST-2201,HR,2025-03-05,850.00,15
+S002,Bold Stationery,BST-2202,Operations,2025-03-20,3400.00,15
+S003,Cape Paper Co,CPC-3301,IT,2025-04-01,9750.00,15
+S003,Cape Paper Co,CPC-3302,Finance,2025-04-18,420.75,15
+S004,Delta Logistics,DLT-4401,Operations,2025-05-09,12000.00,15
+S004,Delta Logistics,DLT-4402,HR,2025-06-14,670.00,15
+S005,Eagle Cleaning,ECL-5501,Facilities,2025-07-22,2250.00,15
+S005,Eagle Cleaning,ECL-5502,Facilities,2025-08-30,2250.00,15
+S002,Bold Stationery,BST-2201,HR,2025-03-05,850.00,15
+S006,FutureTech,FTK-6601,IT,2025-09-11,45000.00,15
+S006,FutureTech,FTK-6602,IT,2025-10-03,18500.00,15
+S007,Green Gardens,GGD-7701,Facilities,2025-11-17,3100.00,15
+S007,Green Gardens,GGD-7702,Facilities,2026-06-01,1800.00,15
+S008,Horizon Media,HMD-8801,Marketing,2025-12-05,7600.00,15
+S008,Horizon Media,HMD-8802,Marketing,2025-12-19,4300.00,15
+S009,Inkwell Print,IWP-9901,Marketing,2026-01-08,990.00,15
+S009,Inkwell Print,IWP-9902,HR,2026-02-14,1450.00,15
+S010,Jade Catering,,Operations,2026-03-01,2800.00,15
