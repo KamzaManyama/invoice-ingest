@@ -1,118 +1,89 @@
-/**
- * Core ingest orchestration pipeline.
- * Accepts a CSV buffer + metadata, runs all stages, returns a summary.
- *
- * Stages:
- *  1. Hash   → idempotency
- *  2. Parse  → raw rows
- *  3. Validate → normalised record or rejection notes
- *  4. Dedup  → skip existing (supplier_number, invoice_number) pairs
- *  5. Insert → write to DB (or dry-run skip)
- *  6. Alert  → fire-and-forget email summary
- */
 import { parseCsvBuffer, computeHash } from '../utils/csvParser.js';
-import { validateRow } from './validator.js';
+import { validateRow }                 from './validator.js';
 import { isDuplicate, insertInvoice, recordFailure } from './invoiceService.js';
-import { sendIngestAlert } from './emailService.js';
+import { sendIngestAlert }             from './emailService.js';
+import { audit }                       from './auditService.js';
 
-const MYSQL_DUPLICATE_ENTRY = 'ER_DUP_ENTRY';
+const MYSQL_DUP = 'ER_DUP_ENTRY';
 
-/**
- * @param {Buffer}  fileBuffer
- * @param {string}  fileName
- * @param {boolean} dryRun
- * @param {string}  [source]   - 'upload' | 'gmail' | 'webhook'
- * @returns {Promise<object>}
- */
-export async function runIngestPipeline(fileBuffer, fileName, dryRun = false, source = 'upload') {
-  const startedAt = Date.now();
+export async function runIngestPipeline(ctx, fileBuffer, fileName, dryRun=false, source='upload') {
+  const { orgId, org, user, req } = ctx;
+  const startedAt  = Date.now();
   const sourceHash = computeHash(fileBuffer);
 
-  // ── 1. Parse ──────────────────────────────────────────────────────────────
   let rows;
-  try {
-    rows = await parseCsvBuffer(fileBuffer);
-  } catch (err) {
-    throw new Error(`CSV parse error: ${err.message}`);
-  }
+  try { rows = await parseCsvBuffer(fileBuffer); }
+  catch(err) { throw new Error(`CSV parse error: ${err.message}`); }
 
-  const metrics = { processed: rows.length, inserted: 0, duplicates: 0, failed: 0 };
+  const metrics = { processed: rows.length, inserted:0, duplicates:0, failed:0, pending:0 };
   const results = [];
-  const errorDetails = [];
+  const errors  = [];
 
-  // ── 2. Row-wise processing ────────────────────────────────────────────────
-  for (const [index, raw] of rows.entries()) {
-    const rowNum = index + 2; // account for header row
-
-    // Validate & normalise
+  for (const [i, raw] of rows.entries()) {
+    const rowNum = i + 2;
     const { valid, record, notes } = validateRow(raw);
 
     if (!valid) {
       const reason = notes.join('; ');
       metrics.failed++;
-      results.push(makeResult(rowNum, raw, 'failed', reason));
-      errorDetails.push({ invoice_number: raw.invoice_number ?? '—', supplier_number: raw.supplier_number ?? '—', reason });
-      recordFailure(raw, reason, fileName, sourceHash).catch((e) =>
-        console.warn(`[pipeline] recordFailure row ${rowNum}:`, e.message)
-      );
+      results.push(mk(rowNum, raw, 'failed', reason));
+      errors.push({ invoice_number: raw.invoice_number??'—', supplier_number: raw.supplier_number??'—', reason });
+      if (!dryRun) await recordFailure(orgId, raw, reason, fileName, sourceHash);
       continue;
     }
 
-    // Dedup check
     let dup = false;
-    try {
-      dup = await isDuplicate(record.supplier_number, record.invoice_number);
-    } catch (err) {
-      console.error(`[pipeline] Dedup query failed row ${rowNum}:`, err.message);
-    }
+    try { dup = await isDuplicate(orgId, record.supplier_number, record.invoice_number); }
+    catch(e) { console.error(`[pipeline] dedup row ${rowNum}:`, e.message); }
 
     if (dup) {
       metrics.duplicates++;
-      results.push(makeResult(rowNum, record, 'duplicate',
-        'Duplicate: (supplier_number, invoice_number) already exists.'));
+      results.push(mk(rowNum, record, 'duplicate', 'Already exists in your records.'));
       continue;
     }
 
-    // Insert
     if (dryRun) {
       metrics.inserted++;
-      results.push(makeResult(rowNum, record, 'inserted', '[DRY-RUN] Not written to DB.'));
+      results.push(mk(rowNum, record, 'inserted', '[DRY-RUN] Not saved.'));
       continue;
     }
 
+    const needsApproval = org?.approvalThreshold &&
+      Number(record.amount_incl_vat) >= Number(org.approvalThreshold);
+
     try {
-      await insertInvoice(record, fileName, sourceHash, false);
-      metrics.inserted++;
-      results.push(makeResult(rowNum, record, 'inserted', null));
-    } catch (err) {
-      if (err.code === MYSQL_DUPLICATE_ENTRY) {
-        metrics.duplicates++;
-        results.push(makeResult(rowNum, record, 'duplicate', 'Duplicate detected on insert (race condition).'));
+      const { status } = await insertInvoice(orgId, record, fileName, sourceHash, user?.id, needsApproval);
+      if (status === 'pending') {
+        metrics.pending++;
+        results.push(mk(rowNum, record, 'pending', `Requires approval (above R${Number(org.approvalThreshold).toLocaleString('en-ZA')})`));
       } else {
-        const reason = `DB insert error: ${err.message}`;
+        metrics.inserted++;
+        results.push(mk(rowNum, record, 'inserted', null));
+      }
+    } catch(err) {
+      if (err.code === MYSQL_DUP) {
+        metrics.duplicates++;
+        results.push(mk(rowNum, record, 'duplicate', 'Duplicate (race condition).'));
+      } else {
+        const reason = `Save error: ${err.message}`;
         metrics.failed++;
-        results.push(makeResult(rowNum, record, 'failed', reason));
-        errorDetails.push({ invoice_number: record.invoice_number, supplier_number: record.supplier_number, reason });
+        results.push(mk(rowNum, record, 'failed', reason));
+        errors.push({ invoice_number: record.invoice_number, supplier_number: record.supplier_number, reason });
       }
     }
   }
 
   const duration = Date.now() - startedAt;
 
-  // ── 3. Alert (fire-and-forget) ────────────────────────────────────────────
-  sendIngestAlert({ fileName, ...metrics, errors: errorDetails, dryRun, source })
-    .catch((err) => console.error('[pipeline] Email alert failed:', err.message));
+  audit({ orgId, user, req, eventType:'upload',
+    detail:`${fileName}: ${metrics.processed} rows — ${metrics.inserted} inserted, ${metrics.duplicates} dup, ${metrics.failed} failed${dryRun?' [DRY-RUN]':''}` });
+
+  sendIngestAlert({ orgName: org?.name, userEmail: user?.email, fileName, ...metrics, errors, dryRun, source })
+    .catch(e => console.error('[pipeline] email:', e.message));
 
   return { fileName, sourceHash, dryRun, source, duration, metrics, results };
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────
-function makeResult(row, data, status, note) {
-  return {
-    row,
-    invoice_number:  data.invoice_number  ?? '—',
-    supplier_number: data.supplier_number ?? '—',
-    status,
-    validation_notes: note ?? null,
-  };
+function mk(row, data, status, note) {
+  return { row, invoice_number: data.invoice_number??'—', supplier_number: data.supplier_number??'—', status, validation_notes: note??null };
 }

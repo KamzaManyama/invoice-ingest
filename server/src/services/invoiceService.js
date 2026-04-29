@@ -1,133 +1,84 @@
-/**
- * Invoice persistence service.
- * All queries use mysql2's pool.execute() for prepared statements.
- * mysql2 returns [rows, fields] — we always destructure accordingly.
- */
-import pool from '../config/db.js';
-import { v4 as uuidv4 } from 'uuid';
+import pool           from '../config/db.js';
+import { v4 as uuid } from 'uuid';
 
-/**
- * Check if an invoice already exists by (supplier_number, invoice_number).
- * @returns {Promise<boolean>}
- */
-export async function isDuplicate(supplierNumber, invoiceNumber) {
+export async function isDuplicate(orgId, supplierNumber, invoiceNumber) {
   const [rows] = await pool.execute(
-    `SELECT 1 FROM supplier_invoices
-     WHERE supplier_number = ? AND invoice_number = ?
-     LIMIT 1`,
-    [supplierNumber, invoiceNumber]
+    `SELECT 1 FROM supplier_invoices WHERE org_id=? AND supplier_number=? AND invoice_number=? LIMIT 1`,
+    [orgId, supplierNumber, invoiceNumber]
   );
   return rows.length > 0;
 }
 
-/**
- * Insert a validated, normalised invoice record.
- * @returns {Promise<object>} the inserted record
- */
-export async function insertInvoice(record, sourceFile, sourceHash, dryRun = false) {
-  const table = dryRun ? 'supplier_invoices_staging' : 'supplier_invoices';
-  const id = uuidv4();
-
+export async function insertInvoice(orgId, record, sourceFile, sourceHash, uploadedBy, requiresApproval) {
+  const id     = uuid();
+  const status = requiresApproval ? 'pending' : 'inserted';
   await pool.execute(
-    `INSERT INTO ${table}
-       (id, invoice_number, supplier_number, supplier_name, department,
-        amount_excl_vat, vat, amount_incl_vat, invoice_date,
-        source_file_name, source_hash, status, validation_notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'inserted', NULL)`,
-    [
-      id,
-      record.invoice_number,
-      record.supplier_number,
-      record.supplier_name,
-      record.department,
-      record.amount_excl_vat,
-      record.vat,
-      record.amount_incl_vat,
-      record.invoice_date,
-      sourceFile,
-      sourceHash,
-    ]
+    `INSERT INTO supplier_invoices
+       (id,org_id,invoice_number,supplier_number,supplier_name,department,
+        amount_excl_vat,vat,amount_incl_vat,invoice_date,
+        source_file_name,source_hash,uploaded_by,status)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id,orgId,record.invoice_number,record.supplier_number,record.supplier_name,
+     record.department,record.amount_excl_vat,record.vat,record.amount_incl_vat,
+     record.invoice_date,sourceFile,sourceHash,uploadedBy||null,status]
   );
-
-  return { id, ...record, source_file_name: sourceFile, source_hash: sourceHash, status: 'inserted' };
+  return { id, status };
 }
 
-/**
- * Record a failed row in supplier_invoices_failures for retry tracking.
- */
-export async function recordFailure(rawRow, errorMessage, sourceFile, sourceHash) {
+export async function recordFailure(orgId, rawRow, errorMessage, sourceFile, sourceHash) {
   await pool.execute(
-    `INSERT INTO supplier_invoices_failures
-       (id, source_file_name, source_hash, raw_row, error_message)
-     VALUES (?, ?, ?, ?, ?)`,
-    [uuidv4(), sourceFile, sourceHash, JSON.stringify(rawRow), errorMessage]
-  );
+    `INSERT INTO supplier_invoices_failures (id,org_id,source_file_name,source_hash,raw_row,error_message)
+     VALUES (?,?,?,?,?,?)`,
+    [uuid(),orgId,sourceFile,sourceHash,JSON.stringify(rawRow),errorMessage]
+  ).catch(e => console.warn('[invoice] recordFailure:', e.message));
 }
 
-/**
- * Paginated invoice list with optional status + full-text search filters.
- * @returns {Promise<{ rows: object[], total: number }>}
- */
-export async function getInvoices({ status, page = 1, limit = 20, search } = {}) {
-  const offset = (page - 1) * limit;
-  const conditions = [];
-  const params = [];
+export async function getInvoices(orgId, { status, search, department, from, to, page=1, limit=20 }={}) {
+  const offset = (page-1)*limit;
+  const conds  = ['org_id=?'];
+  const params = [orgId];
+  if (status)     { conds.push('status=?'); params.push(status); }
+  if (department) { conds.push('department=?'); params.push(department); }
+  if (search)     { conds.push('(invoice_number LIKE ? OR supplier_name LIKE ? OR supplier_number LIKE ?)'); const l=`%${search}%`; params.push(l,l,l); }
+  if (from)       { conds.push('invoice_date>=?'); params.push(from); }
+  if (to)         { conds.push('invoice_date<=?'); params.push(to); }
+  const where = `WHERE ${conds.join(' AND ')}`;
+  const [rows]  = await pool.execute(`SELECT * FROM supplier_invoices ${where} ORDER BY ingest_timestamp DESC LIMIT ? OFFSET ?`, [...params,limit,offset]);
+  const [cnt]   = await pool.execute(`SELECT COUNT(*) AS total FROM supplier_invoices ${where}`, params);
+  return { rows, total: cnt[0].total };
+}
 
-  if (status) {
-    conditions.push('status = ?');
-    params.push(status);
-  }
-  if (search) {
-    conditions.push('(invoice_number LIKE ? OR supplier_name LIKE ? OR supplier_number LIKE ?)');
-    const like = `%${search}%`;
-    params.push(like, like, like);
-  }
-
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
+export async function getStats(orgId) {
   const [rows] = await pool.execute(
-    `SELECT * FROM supplier_invoices ${where}
-     ORDER BY ingest_timestamp DESC
-     LIMIT ? OFFSET ?`,
-    [...params, limit, offset]
+    `SELECT COUNT(*) AS total,
+            SUM(status IN ('inserted','approved')) AS inserted,
+            SUM(status='duplicate') AS duplicate,
+            SUM(status='failed') AS failed,
+            SUM(status='pending') AS pending
+     FROM supplier_invoices WHERE org_id=?`, [orgId]
   );
-
-  const [countRows] = await pool.execute(
-    `SELECT COUNT(*) AS total FROM supplier_invoices ${where}`,
-    params
-  );
-
-  return { rows, total: countRows[0].total };
-}
-
-/**
- * Aggregate counts by status.
- */
-export async function getStats() {
-  const [rows] = await pool.execute(`
-    SELECT
-      COUNT(*)                                              AS total,
-      SUM(status = 'inserted')                             AS inserted,
-      SUM(status = 'duplicate')                            AS duplicate,
-      SUM(status = 'failed')                               AS failed
-    FROM supplier_invoices
-  `);
   return rows[0];
 }
 
-/**
- * Read / write Gmail history ID for incremental polling.
- */
-export async function getGmailHistoryId() {
-  const [rows] = await pool.execute(
-    'SELECT history_id FROM gmail_poll_state WHERE id = 1'
+export async function approveInvoice(orgId, id, userId) {
+  const [r] = await pool.execute(
+    `UPDATE supplier_invoices SET status='approved',approved_by=?,approved_at=NOW()
+     WHERE id=? AND org_id=? AND status='pending'`, [userId,id,orgId]
   );
-  return rows[0]?.history_id ?? 0;
+  if (!r.affectedRows) throw Object.assign(new Error('Invoice not found or not pending.'),{status:404});
 }
 
-export async function setGmailHistoryId(historyId) {
-  await pool.execute(
-    'UPDATE gmail_poll_state SET history_id = ? WHERE id = 1',
-    [historyId]
+export async function rejectInvoice(orgId, id) {
+  const [r] = await pool.execute(
+    `UPDATE supplier_invoices SET status='rejected' WHERE id=? AND org_id=? AND status='pending'`,[id,orgId]
   );
+  if (!r.affectedRows) throw Object.assign(new Error('Invoice not found or not pending.'),{status:404});
+}
+
+export async function getGmailHistoryId(orgId) {
+  const [rows] = await pool.execute('SELECT history_id FROM gmail_poll_state WHERE org_id=? LIMIT 1',[orgId]);
+  return rows[0]?.history_id ?? 0;
+}
+export async function setGmailHistoryId(orgId, historyId) {
+  await pool.execute('UPDATE gmail_poll_state SET history_id=? WHERE org_id=?',[historyId,orgId]);
 }
