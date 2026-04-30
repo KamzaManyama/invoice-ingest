@@ -1,11 +1,11 @@
 import { Router }          from 'express';
-import { signup, login, forgotPassword, resetPassword } from '../src/services/authService.js';
-import { requireAuth, requireRole } from '../src/middleware/auth.js';
-import { handleUpload }    from '../src/middleware/upload.js';
-import { runIngestPipeline } from '../src/services/ingestPipeline.js';
-import { getInvoices, getStats, approveInvoice, rejectInvoice } from '../src/services/invoiceService.js';
-import { audit }           from '../src/services/auditService.js';
-import pool                from '../src/config/db.js';
+import { signup, login, forgotPassword, resetPassword } from './services/authService.js';
+import { requireAuth, requireRole } from './middleware/auth.js';
+import { handleUpload }    from './middleware/upload.js';
+import { runIngestPipeline } from './services/ingestPipeline.js';
+import { getInvoices, getStats, approveInvoice, rejectInvoice } from './services/invoiceService.js';
+import { audit }           from './services/auditService.js';
+import pool                from './config/db.js';
 import { v4 as uuid }      from 'uuid';
 
 const r = Router();

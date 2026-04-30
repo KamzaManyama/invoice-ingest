@@ -27,6 +27,7 @@ router.post('/', async (req, res) => {
   const source = req.query.source === 'webhook' ? 'webhook' : 'upload';
 
   const result = await runIngestPipeline(
+    { orgId: req.orgId, org: req.org, user: req.user, req },
     req.file.buffer,
     req.file.originalname,
     dryRun,

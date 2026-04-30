@@ -10,7 +10,7 @@ const router = Router();
 router.get('/', async (req, res) => {
   const { status, page, limit, search } = req.query;
 
-  const result = await getInvoices({
+  const result = await getInvoices(req.orgId, {
     status: status || undefined,
     page: page ? parseInt(page) : 1,
     limit: limit ? Math.min(parseInt(limit), 100) : 20,
@@ -24,7 +24,7 @@ router.get('/', async (req, res) => {
  * GET /api/invoices/stats
  */
 router.get('/stats', async (_req, res) => {
-  const stats = await getStats();
+  const stats = await getStats(req.orgId);
   res.json(stats);
 });
 
